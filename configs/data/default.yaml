@@ -1,0 +1,52 @@
+# Data-factory configuration. Values mirror src/spectral/data/config.py (DataConfig).
+# Unknown keys here fail loudly, so a typo can't silently be ignored.
+
+base_seed: 0        # drives per-sample mixture sampling
+n_samples: 10000    # virtual dataset length (samples generated on the fly)
+
+grid:
+  ppm_min: 0.0
+  ppm_max: 10.0
+  n_points: 2048    # power of two -> clean patching later
+
+library:
+  n_compounds: 12
+  seed: 1234         # library frozen from this seed
+  path: assets/library.json
+  peaks_min: 2
+  peaks_max: 5
+  lineshape: lorentzian
+  width_min_ppm: 0.02
+  width_max_ppm: 0.045
+  amp_min: 0.5
+  amp_max: 1.0
+  spectrometer_mhz: 300.0
+  j_min_hz: 6.0
+  j_max_hz: 14.0
+  regions:
+    - {name: aromatic,  ppm_min: 6.5, ppm_max: 8.5, weight: 0.35}
+    - {name: mid,       ppm_min: 3.0, ppm_max: 4.8, weight: 0.20}
+    - {name: aliphatic, ppm_min: 0.5, ppm_max: 3.0, weight: 0.45}
+  multiplicities:      [1, 2, 3, 4]
+  multiplicity_probs:  [0.45, 0.30, 0.15, 0.10]
+
+mixture:
+  k_min: 2
+  k_max: 5
+  conc_min: 0.3
+  conc_max: 1.0
+
+corruptions:
+  snr: 30.0          # peak-height / noise-std (higher = cleaner)
+  baseline_frac: 0.05
+  baseline_n_waves: 3
+  jitter_ppm: 0.004
+  phase_deg: 0.0     # 0 = no phase distortion (keeps reconstruction invariant exact)
+
+difficulty:          # endpoints for the single difficulty knob (Phase 6)
+  snr_easy: 40.0
+  snr_hard: 6.0
+  kmax_easy: 2
+  kmax_hard: 5
+  jitter_easy_ppm: 0.002
+  jitter_hard_ppm: 0.010

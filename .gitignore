@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Data artifacts / generated outputs
+*.npz
+*.npy
+experiments/**
+!experiments/.gitkeep
+
+# Experiment tracking
+wandb/
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
+
+# Local-only project plan (not published)
+plan.md

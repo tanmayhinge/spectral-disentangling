@@ -1,0 +1,3 @@
+# Top-level run settings. Phase 1 will add a nested `data:` block here.
+seed: 0
+deterministic: true
