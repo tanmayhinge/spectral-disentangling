@@ -71,3 +71,26 @@ Each entry: **what** we decided and **why**, so it can be defended later.
   fingerprints make presence ~matched filtering). The meaningful test for pretraining is the
   Phase-4 low-label sweep (10/100/1000 labels) and/or higher difficulty; from-scratch has no
   headroom to beat at 4000 labels.
+
+## Phase 3 - masked self-supervised pretraining (built)
+- **Method: masked patch modeling** (BERT-style, not MAE). Replace masked patch embeddings
+  with a learned `mask_token`, encode with the SAME `SpectralEncoder` as Phase 2, and a
+  linear head predicts each patch's raw values. Loss = MSE on masked patches only. Chosen
+  over MAE's encoder/decoder split for legibility and because it reuses the exact encoder we
+  fine-tune later.
+- **Masking: contiguous spans**, not isolated patches. `mask_ratio=0.5`, `span_len=4` patches
+  (128 points, wide enough to hide a whole peak). Rationale: neighboring points are
+  correlated, so single-patch masking is solvable by interpolation and teaches little; spans
+  force use of longer-range structure.
+- **Reconstruction target**: raw patch values (no per-patch normalization) so the sanity
+  figure is directly interpretable.
+- **Data**: 20000 UNLABELED mixtures on a disjoint stream (pretrain_seed=20000) from train
+  (0) and val (10001), so pretraining never sees the fine-tuning inputs. AdamW lr 3e-4,
+  batch 128, 20 epochs.
+- **Transfer contract**: only `encoder.state_dict()` is saved (to
+  experiments/pretrained_encoder.pt); a test asserts it loads strict=True into the Phase-2
+  PresenceClassifier's encoder. This is the Phase-4 initialization.
+- **Result**: held-out masked MSE 0.0089 -> 0.0038 (still decreasing). Reconstructions fill
+  hidden spans with denoised peaks near ground truth -> evidence it learned peak
+  location/shape structure without labels. Known limitation: MSE makes it under-predict peak
+  heights (regresses toward the mean) and occasionally miss faint peaks.

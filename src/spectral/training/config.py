@@ -32,3 +32,28 @@ class ExperimentConfig(YamlConfig):
     data: DataConfig = field(default_factory=DataConfig)
     model: ModelConfig = field(default_factory=ModelConfig)
     train: TrainConfig = field(default_factory=TrainConfig)
+
+
+@dataclass
+class PretrainConfig(YamlConfig):
+    """Self-supervised masked-pretraining loop (Phase 3). No labels used."""
+
+    n_pretrain: int = 20000
+    pretrain_seed: int = 20000   # mixture stream disjoint from train (0) and val (10001)
+    n_recon_examples: int = 4     # samples shown in the reconstruction sanity figure
+    batch_size: int = 128
+    epochs: int = 20
+    lr: float = 3e-4
+    weight_decay: float = 0.01
+    mask_ratio: float = 0.5       # fraction of patches hidden per sample
+    span_len: int = 4             # masked patches come in contiguous spans of this length
+    seed: int = 0
+    device: str = "auto"
+    encoder_out: str = "experiments/pretrained_encoder.pt"  # weights for Phase-4 fine-tuning
+
+
+@dataclass
+class PretrainExperimentConfig(YamlConfig):
+    data: DataConfig = field(default_factory=DataConfig)
+    model: ModelConfig = field(default_factory=ModelConfig)
+    pretrain: PretrainConfig = field(default_factory=PretrainConfig)

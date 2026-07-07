@@ -67,16 +67,28 @@ class SpectralEncoder(nn.Module):
             layer, num_layers=cfg.n_layers, enable_nested_tensor=False
         )
 
+    def embed_patches(self, x: torch.Tensor) -> torch.Tensor:
+        """x: (B, n_points) -> patch embeddings (B, n_patches, d_model). No CLS/positions."""
+        x = x.unsqueeze(1)                          # (B, 1, n_points)
+        return self.patch_embed(x).transpose(1, 2)  # (B, n_patches, d_model)
+
+    def encode_tokens(self, patch_tokens: torch.Tensor) -> torch.Tensor:
+        """Prepend CLS, add positions, run the encoder.
+
+        Takes patch embeddings (B, n_patches, d_model) so callers (e.g. masked pretraining)
+        can substitute a mask token for some patches before encoding.
+        Returns (B, n_patches + 1, d_model); token 0 is CLS.
+        """
+        cls = self.cls_token.expand(patch_tokens.size(0), -1, -1)
+        x = torch.cat([cls, patch_tokens], dim=1) + self.pos_embed
+        return self.encoder(x)
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """x: (B, n_points) -> token embeddings (B, n_patches + 1, d_model).
 
         Token 0 is the CLS token; tokens 1.. are the patches in order.
         """
-        x = x.unsqueeze(1)                       # (B, 1, n_points)
-        x = self.patch_embed(x).transpose(1, 2)  # (B, n_patches, d_model)
-        cls = self.cls_token.expand(x.size(0), -1, -1)
-        x = torch.cat([cls, x], dim=1) + self.pos_embed
-        return self.encoder(x)
+        return self.encode_tokens(self.embed_patches(x))
 
 
 class PresenceClassifier(nn.Module):

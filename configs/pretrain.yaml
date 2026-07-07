@@ -1,0 +1,71 @@
+# Phase 3: self-supervised masked pretraining (no labels).
+# Reuses the same data factory and encoder as Phase 2; adds masking + reconstruction.
+
+data:
+  base_seed: 0
+  n_samples: 10000
+  grid:
+    ppm_min: 0.0
+    ppm_max: 10.0
+    n_points: 2048
+  library:
+    n_compounds: 12
+    seed: 1234
+    path: assets/library.json
+    peaks_min: 2
+    peaks_max: 5
+    lineshape: lorentzian
+    width_min_ppm: 0.02
+    width_max_ppm: 0.045
+    amp_min: 0.5
+    amp_max: 1.0
+    spectrometer_mhz: 300.0
+    j_min_hz: 6.0
+    j_max_hz: 14.0
+    regions:
+      - {name: aromatic,  ppm_min: 6.5, ppm_max: 8.5, weight: 0.35}
+      - {name: mid,       ppm_min: 3.0, ppm_max: 4.8, weight: 0.20}
+      - {name: aliphatic, ppm_min: 0.5, ppm_max: 3.0, weight: 0.45}
+    multiplicities:      [1, 2, 3, 4]
+    multiplicity_probs:  [0.45, 0.30, 0.15, 0.10]
+  mixture:
+    k_min: 2
+    k_max: 5
+    conc_min: 0.3
+    conc_max: 1.0
+  corruptions:
+    snr: 30.0
+    baseline_frac: 0.05
+    baseline_n_waves: 3
+    jitter_ppm: 0.004
+    phase_deg: 0.0
+  difficulty:
+    snr_easy: 40.0
+    snr_hard: 6.0
+    kmax_easy: 2
+    kmax_hard: 5
+    jitter_easy_ppm: 0.002
+    jitter_hard_ppm: 0.010
+
+model:
+  patch_size: 32
+  d_model: 128
+  n_heads: 4
+  n_layers: 4
+  dim_feedforward: 256
+  dropout: 0.1
+  pool: cls
+
+pretrain:
+  n_pretrain: 20000
+  pretrain_seed: 20000    # disjoint from train (0) and val (10001)
+  n_recon_examples: 4
+  batch_size: 128
+  epochs: 20
+  lr: 0.0003
+  weight_decay: 0.01
+  mask_ratio: 0.5
+  span_len: 4
+  seed: 0
+  device: auto
+  encoder_out: experiments/pretrained_encoder.pt
