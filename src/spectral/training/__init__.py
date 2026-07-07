@@ -2,6 +2,8 @@
 
 from spectral.training.config import (
     ExperimentConfig,
+    FinetuneConfig,
+    FinetuneExperimentConfig,
     PretrainConfig,
     PretrainExperimentConfig,
     TrainConfig,
@@ -14,6 +16,8 @@ __all__ = [
     "TrainConfig",
     "PretrainConfig",
     "PretrainExperimentConfig",
+    "FinetuneConfig",
+    "FinetuneExperimentConfig",
     "build_presence_tensors",
     "build_mixture_tensor",
     "PresenceScores",

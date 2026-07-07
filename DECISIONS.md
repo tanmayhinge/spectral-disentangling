@@ -94,3 +94,28 @@ Each entry: **what** we decided and **why**, so it can be defended later.
   hidden spans with denoised peaks near ground truth -> evidence it learned peak
   location/shape structure without labels. Known limitation: MSE makes it under-predict peak
   heights (regresses toward the mean) and occasionally miss faint peaks.
+
+## Phase 4 - fine-tuning and the headline comparison (built)
+- **Protocol**: controlled full fine-tuning. For each label size and seed, train the same
+  classifier twice (scratch vs pretrained encoder init) with identical head init, batch
+  order, optimizer, and a fixed 600-step budget; report best val macro-F1. 3 seeds ->
+  std bands. Labeled streams (seed 1000+s), val (10001), pretrain (20000) all disjoint.
+- **HEADLINE RESULT (honest)**: pretraining gives only a marginal, mostly within-noise
+  edge in this regime.
+  | n_labels | scratch | pretrained | gain |
+  |---|---|---|---|
+  | 10 | 0.423 +/- .021 | 0.453 +/- .051 | +0.030 |
+  | 40 | 0.711 | 0.711 | +0.000 |
+  | 160 | 0.946 | 0.954 | +0.008 |
+  | 640 | 0.994 | 0.995 | +0.001 |
+  | 2560 | 0.998 | 0.998 | -0.000 |
+  The +0.03 at n=10 is smaller than its std, so not conclusive.
+- **Why (working hypotheses)**: (a) the task is easy - fixed distinct fingerprints make
+  presence ~matched filtering, so from-scratch learns fast even with few labels, leaving
+  little headroom; (b) 600 steps of full fine-tuning can overwrite pretrained features;
+  (c) the denoise/inpaint pretext teaches peak location/shape, which the supervised task
+  also picks up on its own here.
+- **Planned investigations** (surfaced for Tanmay, not yet run): frozen-encoder LINEAR
+  PROBES (Phase 5) to test representation quality without fine-tuning erasing it; and a
+  HARDER difficulty regime (Phase 6: low SNR, more overlap/components) where from-scratch
+  should struggle and pretraining has room to help. Also: more seeds to tighten n=10.

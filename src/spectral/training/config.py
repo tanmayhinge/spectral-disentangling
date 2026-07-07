@@ -57,3 +57,37 @@ class PretrainExperimentConfig(YamlConfig):
     data: DataConfig = field(default_factory=DataConfig)
     model: ModelConfig = field(default_factory=ModelConfig)
     pretrain: PretrainConfig = field(default_factory=PretrainConfig)
+
+
+@dataclass
+class FinetuneConfig(YamlConfig):
+    """Phase 4: the label-efficiency sweep comparing pretrained vs from-scratch init.
+
+    Each run fine-tunes the full model on `n` labeled examples for a fixed optimization
+    budget (`max_steps`), tracking the best validation macro-F1. Scratch and pretrained
+    runs share the same seed, so head init and batch order are identical -- the only
+    difference is whether the encoder starts from `pretrained_encoder`.
+    """
+
+    label_sizes: list = field(default_factory=lambda: [10, 40, 160, 640, 2560])
+    seeds: list = field(default_factory=lambda: [0, 1, 2])
+    max_steps: int = 600
+    eval_every: int = 100
+    batch_size: int = 64            # actual batch is min(batch_size, n)
+    lr: float = 5e-4
+    weight_decay: float = 0.01
+    threshold: float = 0.5
+
+    labeled_seed_base: int = 1000   # labeled stream per seed = base + seed (disjoint from val/pretrain)
+    val_seed: int = 10001
+    n_val: int = 1000
+
+    pretrained_encoder: str = "experiments/pretrained_encoder.pt"
+    device: str = "auto"
+
+
+@dataclass
+class FinetuneExperimentConfig(YamlConfig):
+    data: DataConfig = field(default_factory=DataConfig)
+    model: ModelConfig = field(default_factory=ModelConfig)
+    finetune: FinetuneConfig = field(default_factory=FinetuneConfig)
