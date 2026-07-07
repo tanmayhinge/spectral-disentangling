@@ -52,3 +52,22 @@ Each entry: **what** we decided and **why**, so it can be defended later.
 ### Scope
 - **Synthetic-only through Phase 6**; real spectra optional later via a `render`-compatible
   library (the `CompoundLibrary` interface).
+
+## Phase 2 - from-scratch baseline (built)
+- **Signal representation: patched tokens** (the Open Question). The 2048-point spectrum is
+  split into non-overlapping patches of 32 points (64 tokens + 1 CLS), each linearly
+  embedded via a strided Conv1d. Chosen over (a) raw per-point tokens (length-2048 sequence,
+  wasteful O(n^2) attention over mostly-empty baseline) and (b) peak-list input (needs a
+  separate peak-picker, discards the raw signal and corruptions, and would not transfer to
+  Phase-3 masked reconstruction). The patch layout is exactly what Phase 3 will mask.
+- **Backbone**: pre-norm transformer encoder, d_model=128, 4 heads, 4 layers, ff=256,
+  GELU, learned positional + CLS embeddings. ~544k params. Encoder returns per-token
+  embeddings so later phases can attach reconstruction/regression heads.
+- **Task/loss**: multi-label presence via `BCEWithLogitsLoss` on 12 logits (CLS pooling).
+- **Optim**: AdamW, lr 3e-4, weight_decay 0.01, batch 64, 15 epochs. Train/val are disjoint
+  reproducible mixture pools (base_seed 0 vs 10001); data pre-generated once and cached.
+- **Result**: val macro-F1 = 0.997, exact-match = 0.978 with 4000 labels. NOTE: the task is
+  nearly saturated in the abundant-label regime, which is expected (fixed distinct
+  fingerprints make presence ~matched filtering). The meaningful test for pretraining is the
+  Phase-4 low-label sweep (10/100/1000 labels) and/or higher difficulty; from-scratch has no
+  headroom to beat at 4000 labels.
