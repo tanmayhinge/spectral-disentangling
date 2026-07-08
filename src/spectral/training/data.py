@@ -37,6 +37,29 @@ def build_presence_tensors(
     return torch.from_numpy(x), torch.from_numpy(y)
 
 
+def build_labeled_tensors(
+    data_cfg: DataConfig, library: CompoundLibrary, base_seed: int, n: int
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Generate `n` mixtures with full labels -> (X, present, concentrations).
+
+    Used by the probes, which decode presence, component count, and concentration from
+    frozen features. Shapes: X (n, N), present (n, M), concentrations (n, M).
+    """
+    cfg = copy.deepcopy(data_cfg)
+    cfg.base_seed = base_seed
+    gen = MixtureGenerator(cfg, library)
+
+    n_points = cfg.grid.n_points
+    m = library.n_compounds
+    x = np.zeros((n, n_points), dtype=np.float32)
+    present = np.zeros((n, m), dtype=np.float32)
+    conc = np.zeros((n, m), dtype=np.float32)
+    for i in range(n):
+        s = gen.generate(i)
+        x[i], present[i], conc[i] = s.mixture, s.present, s.concentrations
+    return torch.from_numpy(x), torch.from_numpy(present), torch.from_numpy(conc)
+
+
 def build_mixture_tensor(
     data_cfg: DataConfig, library: CompoundLibrary, base_seed: int, n: int
 ) -> torch.Tensor:

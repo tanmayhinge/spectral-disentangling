@@ -20,6 +20,32 @@ from spectral.training.metrics import presence_scores
 from spectral.utils import PROJECT_ROOT
 
 
+def train_presence_encoder(
+    model_cfg: ModelConfig, n_points: int, n_classes: int,
+    x_train: torch.Tensor, y_train: torch.Tensor,
+    *, steps: int, lr: float, batch_size: int, seed: int, device: torch.device,
+) -> PresenceClassifier:
+    """Train a classifier from scratch on presence labels and return it (for a probe ceiling)."""
+    seed_everything(seed)
+    model = PresenceClassifier(model_cfg, n_points, n_classes).to(device)
+    opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=0.01)
+    crit = nn.BCEWithLogitsLoss()
+    loader = DataLoader(TensorDataset(x_train, y_train), batch_size=batch_size, shuffle=True)
+
+    model.train()
+    step = 0
+    while step < steps:
+        for xb, yb in loader:
+            xb, yb = xb.to(device), yb.to(device)
+            opt.zero_grad()
+            crit(model(xb), yb).backward()
+            opt.step()
+            step += 1
+            if step >= steps:
+                break
+    return model
+
+
 @torch.no_grad()
 def _val_macro_f1(model, x, y, device, threshold, batch_size) -> float:
     model.eval()

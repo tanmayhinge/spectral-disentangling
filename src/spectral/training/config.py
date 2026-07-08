@@ -91,3 +91,41 @@ class FinetuneExperimentConfig(YamlConfig):
     data: DataConfig = field(default_factory=DataConfig)
     model: ModelConfig = field(default_factory=ModelConfig)
     finetune: FinetuneConfig = field(default_factory=FinetuneConfig)
+
+
+@dataclass
+class ProbeConfig(YamlConfig):
+    """Phase 5: linear probes on FROZEN features.
+
+    Encoders are frozen; only a linear layer is trained on top. Compares random (floor),
+    pretrained (the SSL question), and supervised (trained-on-labels reference) encoders on
+    three targets: presence, component count K, and concentrations. Features are mean-pooled
+    over patch tokens (not the task-specific CLS) so no encoder is privileged.
+    """
+
+    probe_label_sizes: list = field(default_factory=lambda: [10, 40, 160, 640, 2560])
+    seeds: list = field(default_factory=lambda: [0, 1, 2])
+    probe_val_n: int = 1000
+    pool: str = "mean"           # "mean" over patch tokens, or "cls"
+    threshold: float = 0.5
+
+    probe_steps: int = 300       # linear-probe optimization steps (full-batch)
+    probe_lr: float = 0.01
+
+    include_supervised: bool = True
+    supervised_train_n: int = 4000
+    supervised_steps: int = 1200
+    supervised_lr: float = 3e-4
+
+    pretrained_encoder: str = "experiments/pretrained_encoder.pt"
+    labeled_seed_base: int = 3000   # probe-train streams (base + seed)
+    supervised_seed: int = 5000     # supervised-encoder training stream
+    val_seed: int = 10001
+    device: str = "auto"
+
+
+@dataclass
+class ProbeExperimentConfig(YamlConfig):
+    data: DataConfig = field(default_factory=DataConfig)
+    model: ModelConfig = field(default_factory=ModelConfig)
+    probe: ProbeConfig = field(default_factory=ProbeConfig)

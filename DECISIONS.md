@@ -119,3 +119,28 @@ Each entry: **what** we decided and **why**, so it can be defended later.
   PROBES (Phase 5) to test representation quality without fine-tuning erasing it; and a
   HARDER difficulty regime (Phase 6: low SNR, more overlap/components) where from-scratch
   should struggle and pretraining has room to help. Also: more seeds to tighten n=10.
+
+## Phase 5 - linear probes on frozen features (built)
+- **Protocol**: freeze the encoder, mean-pool patch tokens (not the task-specific CLS),
+  standardize, train only a linear layer. Compare three encoders - random (floor),
+  pretrained (SSL), supervised (labels-trained ceiling) - on presence (macro-F1), component
+  count K (accuracy), concentration (MAE over present entries). 3 seeds.
+- **KEY RESULT: pretraining clearly DID learn structure.** Frozen pretrained features are
+  much more linearly decodable than random ones:
+  | probe | random | pretrained | supervised |
+  |---|---|---|---|
+  | presence macro-F1 @2560 | 0.729 | **0.872** | 0.998 |
+  | count accuracy | 0.591 | **0.626** | 0.842 |
+  | concentration MAE (lower=better) | 0.239 | **0.150** | 0.138 |
+  Std ~0.001-0.013, so the gaps are real. Pretrained beats random at every presence label
+  size (e.g. +0.118 at n=160). For concentration, pretrained (0.150) is close to the
+  supervised ceiling (0.138) despite never seeing labels.
+- **This resolves the Phase-4 null result.** Pretraining was not useless; FULL fine-tuning
+  on an easy task simply lets from-scratch catch up and overwrite the advantage. Freeze the
+  encoder and the advantage is large and consistent. Interpretation: the SSL representation
+  linearly encodes compositional/physical structure (which compounds, how many, how much) -
+  meaningful structure, not surface memorization. This is the "physics question" answer.
+- **Note**: supervised is an oracle ceiling for presence (it trained on presence); more
+  telling is concentration, which supervised did NOT train on, where pretrained nearly
+  matches it. Next available: attention-on-peaks analysis (Phase 5 extension) and the
+  harder-regime robustness sweep (Phase 6).
