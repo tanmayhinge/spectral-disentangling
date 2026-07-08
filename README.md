@@ -6,8 +6,9 @@ whether self-supervised masked pretraining helps a small transformer separate an
 identify the components - especially when labeled data is scarce.
 
 This is a learning-first, reproducible research demo. It is **not** chasing
-state-of-the-art or using real proprietary data. See [`DECISIONS.md`](DECISIONS.md) for
-the running log of design choices.
+state-of-the-art or using real proprietary data. See [`REPORT.md`](REPORT.md) for the full
+project writeup (motivation, methods, results, and findings), and [`DECISIONS.md`](DECISIONS.md)
+for the running log of design choices.
 
 ## Status
 - **Phase 0 - repo skeleton & sanity**: in progress.
