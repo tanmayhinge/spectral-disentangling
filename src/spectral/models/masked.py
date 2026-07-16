@@ -70,9 +70,19 @@ class MaskedSpectralModel(nn.Module):
         """(B, n_points) -> (B, n_patches, patch_size), the reconstruction target."""
         return x.unfold(dimension=1, size=patch_size, step=patch_size)
 
-    def masked_mse(self, x: torch.Tensor, patch_mask: torch.Tensor) -> torch.Tensor:
-        """Convenience: reconstruction MSE over masked patches only."""
+    def masked_mse(self, x: torch.Tensor, patch_mask: torch.Tensor,
+                   target: torch.Tensor | None = None) -> torch.Tensor:
+        """Reconstruction MSE over masked patches only.
+
+        `target` defaults to `x` itself -- predict back the observed (noisy) signal, the
+        standard masked-modeling pretext used in Phase 3.
+
+        Passing a separate `target` (e.g. the generator's noise-free `clean_mixture`) turns
+        the pretext into DENOISING: fill in the hidden span *and* strip the corruption. The
+        Phase-6 ablation uses this to test whether predicting unpredictable noise is what
+        makes the plain pretext fail at low SNR.
+        """
         recon = self(x, patch_mask)
-        target = self.to_patches(x, self.patch_size)
-        per_patch_mse = ((recon - target) ** 2).mean(dim=-1)  # (B, P)
+        tgt = self.to_patches(x if target is None else target, self.patch_size)
+        per_patch_mse = ((recon - tgt) ** 2).mean(dim=-1)  # (B, P)
         return per_patch_mse[patch_mask].mean()

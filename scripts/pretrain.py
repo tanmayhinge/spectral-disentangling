@@ -4,6 +4,9 @@ Hide random spans of each mixture and train the model to reconstruct the hidden 
 No labels are used. Saves the pretrained encoder weights (for Phase-4 fine-tuning), a loss
 curve, and a reconstruction sanity figure.
 
+The training loop itself lives in `spectral.training.pretrain` so the Phase-6 robustness
+sweep can reuse it; this script is the Phase-3 entry point around it.
+
 Run:  python scripts/pretrain.py --config configs/pretrain.yaml
 """
 
@@ -18,31 +21,20 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
-from torch.utils.data import DataLoader, TensorDataset
 
 from spectral.data.library import CompoundLibrary
-from spectral.models.masked import MaskedSpectralModel, make_batch_mask
+from spectral.models.masked import make_batch_mask
 from spectral.models.transformer import count_parameters
-from spectral.seeding import seed_everything
 from spectral.training.config import PretrainExperimentConfig
 from spectral.training.data import build_mixture_tensor
+from spectral.training.pretrain import pretrain_encoder
 from spectral.utils import PROJECT_ROOT, get_device
+
+N_EVAL = 512  # held-out pool for the reconstruction check
 
 
 def resolve_device(name: str) -> torch.device:
     return get_device() if name == "auto" else torch.device(name)
-
-
-@torch.no_grad()
-def eval_recon_loss(model, x, pcfg, device, mask_rng) -> float:
-    model.eval()
-    total, n = 0.0, 0
-    for i in range(0, x.size(0), pcfg.batch_size):
-        xb = x[i : i + pcfg.batch_size].to(device)
-        mask = make_batch_mask(xb.size(0), model.n_patches, pcfg.mask_ratio, pcfg.span_len, mask_rng).to(device)
-        total += model.masked_mse(xb, mask).item() * xb.size(0)
-        n += xb.size(0)
-    return total / n
 
 
 def main() -> None:
@@ -52,38 +44,21 @@ def main() -> None:
 
     cfg = PretrainExperimentConfig.from_yaml(args.config)
     pcfg = cfg.pretrain
-    seed_everything(pcfg.seed)
     device = resolve_device(pcfg.device)
-    mask_rng = np.random.default_rng(pcfg.seed)  # separate stream for masks
 
     # Unlabeled pretraining pool + a small held-out pool for the reconstruction check.
     library = CompoundLibrary.from_config(cfg.data.library)
     x_pre = build_mixture_tensor(cfg.data, library, pcfg.pretrain_seed, pcfg.n_pretrain)
-    x_eval = build_mixture_tensor(cfg.data, library, pcfg.pretrain_seed + 1, 512)
-    loader = DataLoader(TensorDataset(x_pre), batch_size=pcfg.batch_size, shuffle=True)
+    x_eval = build_mixture_tensor(cfg.data, library, pcfg.pretrain_seed + 1, N_EVAL)
 
-    model = MaskedSpectralModel(cfg.model, cfg.data.grid.n_points).to(device)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=pcfg.lr, weight_decay=pcfg.weight_decay)
+    model, history = pretrain_encoder(
+        cfg.model, cfg.data.grid.n_points, x_pre, x_eval,
+        epochs=pcfg.epochs, batch_size=pcfg.batch_size, lr=pcfg.lr,
+        weight_decay=pcfg.weight_decay, mask_ratio=pcfg.mask_ratio, span_len=pcfg.span_len,
+        seed=pcfg.seed, device=device, log_fn=print,
+    )
     print(f"device={device}  params={count_parameters(model):,}  patches={model.n_patches}  "
           f"pretrain={pcfg.n_pretrain}  mask_ratio={pcfg.mask_ratio}  span_len={pcfg.span_len}")
-
-    history = []
-    for epoch in range(1, pcfg.epochs + 1):
-        model.train()
-        run, seen = 0.0, 0
-        for (xb,) in loader:
-            xb = xb.to(device)
-            mask = make_batch_mask(xb.size(0), model.n_patches, pcfg.mask_ratio, pcfg.span_len, mask_rng).to(device)
-            optimizer.zero_grad()
-            loss = model.masked_mse(xb, mask)
-            loss.backward()
-            optimizer.step()
-            run += loss.item() * xb.size(0)
-            seen += xb.size(0)
-        train_mse = run / seen
-        eval_mse = eval_recon_loss(model, x_eval, pcfg, device, np.random.default_rng(123))
-        history.append((epoch, train_mse, eval_mse))
-        print(f"epoch {epoch:2d}  train_mse={train_mse:.5f}  eval_mse={eval_mse:.5f}")
 
     _save_encoder(model, pcfg)
     _save_curve(history)

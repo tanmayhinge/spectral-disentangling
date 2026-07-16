@@ -129,3 +129,74 @@ class ProbeExperimentConfig(YamlConfig):
     data: DataConfig = field(default_factory=DataConfig)
     model: ModelConfig = field(default_factory=ModelConfig)
     probe: ProbeConfig = field(default_factory=ProbeConfig)
+
+
+@dataclass
+class RobustnessConfig(YamlConfig):
+    """Phase 6: sweep the difficulty knob and re-run both Phase-4 and Phase-5 measurements.
+
+    At each difficulty we pretrain a FRESH encoder on unlabeled mixtures drawn from that same
+    difficulty. Reusing one encoder across the sweep would confound two effects: the task
+    getting harder, and the pretraining data no longer matching the test data. Matched
+    pretraining also mirrors the realistic setting -- plenty of unlabeled spectra from your own
+    instrument, few labels.
+
+    One encoder per difficulty is shared across `seeds` (as in Phases 3-5), so the error bars
+    reflect fine-tuning/probe variance, not pretraining-run variance.
+
+    Two arms per difficulty:
+    - fine-tune: pretrained vs scratch at small label budgets. Tests the standing prediction
+      that the Phase-4 null gap reappears once from-scratch can no longer catch up.
+    - probe: frozen linear probes (random/pretrained/supervised), where Phase 5 found a large
+      effect. Tests where the representation stops linearly encoding structure.
+    """
+
+    difficulties: list = field(default_factory=lambda: [0.0, 0.25, 0.5, 0.75, 1.0])
+    seeds: list = field(default_factory=lambda: [0, 1, 2])
+
+    # --- per-difficulty pretraining (recipe mirrors configs/pretrain.yaml for comparability)
+    n_pretrain: int = 20000
+    n_pretrain_eval: int = 512
+    pretrain_seed: int = 20000      # unlabeled mixture stream
+    pretrain_model_seed: int = 0    # model init + mask stream
+    pretrain_epochs: int = 20
+    pretrain_batch_size: int = 128
+    pretrain_lr: float = 3e-4
+    pretrain_weight_decay: float = 0.01
+    mask_ratio: float = 0.5
+    span_len: int = 4
+    encoder_dir: str = "experiments/robustness"  # per-difficulty encoders land here
+
+    # --- fine-tuning arm (recipe mirrors configs/finetune_sweep.yaml)
+    ft_label_sizes: list = field(default_factory=lambda: [40, 160])
+    max_steps: int = 600
+    eval_every: int = 100
+    batch_size: int = 64
+    lr: float = 5e-4
+    weight_decay: float = 0.01
+    threshold: float = 0.5
+    labeled_seed_base: int = 1000
+
+    # --- probe arm (recipe mirrors configs/probe.yaml)
+    probe_train_n: int = 2560
+    probe_val_n: int = 1000
+    probe_seed_base: int = 3000     # probe-train stream, disjoint from the fine-tune pool
+    pool: str = "mean"
+    probe_steps: int = 300
+    probe_lr: float = 0.01
+    include_supervised: bool = True
+    supervised_train_n: int = 4000
+    supervised_steps: int = 1200
+    supervised_lr: float = 3e-4
+    supervised_seed: int = 5000
+
+    val_seed: int = 10001
+    n_val: int = 1000
+    device: str = "auto"
+
+
+@dataclass
+class RobustnessExperimentConfig(YamlConfig):
+    data: DataConfig = field(default_factory=DataConfig)
+    model: ModelConfig = field(default_factory=ModelConfig)
+    robustness: RobustnessConfig = field(default_factory=RobustnessConfig)

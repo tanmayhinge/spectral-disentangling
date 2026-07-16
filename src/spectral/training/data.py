@@ -75,3 +75,28 @@ def build_mixture_tensor(
     for i in range(n):
         x[i] = gen.generate(i).mixture
     return torch.from_numpy(x)
+
+
+def build_mixture_and_clean_tensors(
+    data_cfg: DataConfig, library: CompoundLibrary, base_seed: int, n: int
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Generate `n` mixtures as (observed, clean) -> both (n, N).
+
+    `clean` is the noise-free, baseline-free sum of components. Used by the Phase-6 pretext
+    ablation as an alternative reconstruction target.
+
+    NOTE ON FAIRNESS: `clean` is ground truth the real unlabeled setting would not hand you,
+    so a denoising pretext trained against it is NOT self-supervised in the strict sense --
+    it is an upper bound on what a better pretext could buy. Any result using it must say so.
+    """
+    cfg = copy.deepcopy(data_cfg)
+    cfg.base_seed = base_seed
+    gen = MixtureGenerator(cfg, library)
+
+    n_points = cfg.grid.n_points
+    observed = np.zeros((n, n_points), dtype=np.float32)
+    clean = np.zeros((n, n_points), dtype=np.float32)
+    for i in range(n):
+        s = gen.generate(i)
+        observed[i], clean[i] = s.mixture, s.clean_mixture
+    return torch.from_numpy(observed), torch.from_numpy(clean)

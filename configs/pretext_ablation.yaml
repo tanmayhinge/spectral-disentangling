@@ -1,0 +1,105 @@
+# Phase 6 follow-up: pretext-target ablation (raw vs clean reconstruction target).
+# Tests whether the low-SNR collapse of the pretrained features is caused by noise in the
+# reconstruction target. The `clean` arm uses ground truth and is an ORACLE DIAGNOSTIC,
+# not a deployable method -- see the docstring in scripts/pretext_ablation.py.
+# Reuses the raw-target encoders cached by scripts/robustness_sweep.py.
+
+data:
+  base_seed: 0
+  n_samples: 10000
+  grid:
+    ppm_min: 0.0
+    ppm_max: 10.0
+    n_points: 2048
+  library:
+    n_compounds: 12
+    seed: 1234
+    path: assets/library.json
+    peaks_min: 2
+    peaks_max: 5
+    lineshape: lorentzian
+    width_min_ppm: 0.02
+    width_max_ppm: 0.045
+    amp_min: 0.5
+    amp_max: 1.0
+    spectrometer_mhz: 300.0
+    j_min_hz: 6.0
+    j_max_hz: 14.0
+    regions:
+      - {name: aromatic,  ppm_min: 6.5, ppm_max: 8.5, weight: 0.35}
+      - {name: mid,       ppm_min: 3.0, ppm_max: 4.8, weight: 0.20}
+      - {name: aliphatic, ppm_min: 0.5, ppm_max: 3.0, weight: 0.45}
+    multiplicities:      [1, 2, 3, 4]
+    multiplicity_probs:  [0.45, 0.30, 0.15, 0.10]
+  mixture:
+    k_min: 2
+    k_max: 5
+    conc_min: 0.3
+    conc_max: 1.0
+  corruptions:
+    snr: 30.0
+    baseline_frac: 0.05
+    baseline_n_waves: 3
+    jitter_ppm: 0.004
+    phase_deg: 0.0
+  difficulty:
+    snr_easy: 40.0
+    snr_hard: 6.0
+    kmax_easy: 2
+    kmax_hard: 5
+    jitter_easy_ppm: 0.002
+    jitter_hard_ppm: 0.010
+
+model:
+  patch_size: 32
+  d_model: 128
+  n_heads: 4
+  n_layers: 4
+  dim_feedforward: 256
+  dropout: 0.1
+  pool: cls
+
+robustness:
+  # Skip d=0.25: the interesting behaviour is the collapse at the hard end, and d=0.00 is
+  # the control where raw and clean targets should barely differ (SNR 40 -> little noise).
+  difficulties: [0.0, 0.5, 0.75, 1.0]
+  seeds: [0, 1, 2]
+
+  # Identical pretraining recipe to the sweep, so the raw arm's cached encoders stay valid.
+  n_pretrain: 20000
+  n_pretrain_eval: 512
+  pretrain_seed: 20000
+  pretrain_model_seed: 0
+  pretrain_epochs: 20
+  pretrain_batch_size: 128
+  pretrain_lr: 0.0003
+  pretrain_weight_decay: 0.01
+  mask_ratio: 0.5
+  span_len: 4
+  encoder_dir: experiments/robustness
+
+  # Unused by this script (it has no fine-tuning arm) but required by the shared dataclass.
+  ft_label_sizes: [40]
+  max_steps: 600
+  eval_every: 100
+  batch_size: 64
+  lr: 0.0005
+  weight_decay: 0.01
+  threshold: 0.5
+  labeled_seed_base: 1000
+
+  probe_train_n: 2560
+  probe_val_n: 1000
+  probe_seed_base: 3000
+  pool: mean
+  probe_steps: 300
+  probe_lr: 0.01
+  include_supervised: true
+  supervised_train_n: 4000
+  supervised_steps: 1200
+  supervised_lr: 0.0003
+  supervised_seed: 5000
+
+  val_seed: 10001
+  n_val: 1000
+  device: auto
