@@ -144,3 +144,154 @@ Each entry: **what** we decided and **why**, so it can be defended later.
   telling is concentration, which supervised did NOT train on, where pretrained nearly
   matches it. Next available: attention-on-peaks analysis (Phase 5 extension) and the
   harder-regime robustness sweep (Phase 6).
+
+## Phase 6 - robustness sweep over difficulty (built)
+- **The knob**: `DataConfig.at_difficulty(d)` linearly interpolates three things between an
+  easy end (d=0: snr 40, k_max 2, jitter 0.002) and a hard end (d=1: snr 6, k_max 5, jitter
+  0.010). Sweep is d = 0, 0.25, 0.5, 0.75, 1.0 with seeds 0/1/2 (matching Phases 4-5).
+- **DECISION - pretrain a FRESH encoder at each difficulty** (rather than reusing the single
+  Phase-3 encoder). Reusing it would confound two effects: the task getting harder, and the
+  pretraining data no longer matching the test data. Matched pretraining also mirrors the
+  realistic setting the KIT posting implies - abundant unlabeled spectra from your own
+  instrument, few labels. Cost is ~7 min/encoder, so 5 encoders is cheap.
+- **DECISION - one encoder per difficulty, shared across the 3 seeds** (as in Phases 3-5).
+  LIMITATION: error bars therefore capture fine-tuning/probe variance but NOT
+  pretraining-run variance. Worth revisiting if a difficulty lands close to a decision
+  boundary.
+- **Two arms per difficulty**, so Phase 6 re-runs both earlier measurements:
+  (a) fine-tune arm: pretrained vs scratch at n = 40 and 160 labels (small budgets only -
+  Phase 4 showed the arms converge once labels are plentiful). Tests the standing prediction
+  that the Phase-4 null gap REAPPEARS once from-scratch can no longer catch up in 600 steps.
+  (b) probe arm: frozen linear probes (random/pretrained/supervised) at 2560 probe labels,
+  reporting presence macro-F1, count accuracy, concentration MAE. Tests where the Phase-5
+  representation advantage breaks down.
+- **Recipes are copied from Phases 3/4/5 unchanged** (mask_ratio 0.5, span_len 4, 20 epochs;
+  600 fine-tune steps; 300 probe steps) so Phase 6 is comparable to them rather than being a
+  new experiment. A test asserts the pretraining recipe still matches Phase 3.
+- **GOTCHA found while building**: at d=0 the knob pins k_max to k_min=2, so EVERY mixture
+  has exactly K=2 and the count probe has a single class - it scores 1.000 for any encoder,
+  random included. That is an artifact of the knob, not a result. The reporting now prints
+  "n/a (K constant)" there and omits the point from the plot instead of showing a perfect
+  score. Same reason the count probe only becomes meaningful from d=0.25 on.
+- **GOTCHA 2 - the difficulty axis is not uniform in K**: `round(lerp(2,5,d))` gives k_max =
+  2, 3, 4, 4, 5 across the five points, so d=0.50 and d=0.75 have the SAME k_max=4 and differ
+  only in SNR/jitter. Any flat stretch between those two points cannot be attributed to
+  component count. Difficulty is a bundle of three knobs, not a scalar - do not read the
+  x-axis as "amount of hardness".
+
+### Phase 6 results
+- **Prediction under test** (from Phase 4): the fine-tuning gap, absent in the easy regime,
+  reappears once the task is hard enough. **Verdict: partially supported, and only at the
+  smallest budget.** Paired per-seed gains (same seed = same head init and batch order):
+  | d | n=40 gain (per-seed) | mean | n=160 gain (per-seed) | mean |
+  |---|---|---|---|---|
+  | 0.00 | +.028 +.048 +.045 | **+0.040** | +.003 -.001 -.003 | -0.000 |
+  | 0.25 | -.042 +.001 -.015 | -0.018 (mixed) | -.007 -.001 -.016 | -0.008 |
+  | 0.50 | +.014 +.029 +.029 | **+0.024** | +.020 +.033 -.006 | +0.016 (mixed) |
+  | 0.75 | +.036 +.029 +.009 | **+0.025** | +.016 +.024 +.001 | +0.014 |
+  | 1.00 | +.106 +.060 +.080 | **+0.082** | +.116 +.035 -.014 | +0.046 (mixed) |
+- **The one solid claim**: at n=40, d=1.00, the gain is +0.082 with all three seeds positive
+  and ~4x the seed std. That is the biggest, cleanest pretraining win in the whole project.
+- **Honest caveats, do NOT overclaim**: (a) the curve is NOT monotone - d=0.00 also shows a
+  consistent +0.040, so "no gap when easy" is false here; (b) the d=0.25 dip is mixed-sign
+  and within noise, i.e. noise, not a real reversal; (c) the n=160 hard-end +0.046 is driven
+  by ONE seed (+0.116) with another negative (-0.014) and std 0.054 > mean - **not reliable**;
+  (d) d=0.00 here (snr 40, K=2 fixed) is a much easier regime than Phase 4's default (snr 30,
+  K=2-5), so the +0.040 does not contradict Phase 4's +0.000 at n=40.
+- **KEY FINDING (probes) - the SSL representation degrades much faster than the task does.**
+  Presence macro-F1 on frozen features:
+  | d | random | pretrained | supervised | pretrained-over-random |
+  |---|---|---|---|---|
+  | 0.00 | 0.875 | 0.933 | 1.000 | +0.058 |
+  | 0.25 | 0.771 | 0.877 | 0.996 | +0.106 |
+  | 0.50 | 0.659 | 0.811 | 0.991 | +0.152 |
+  | 0.75 | 0.532 | 0.704 | 0.984 | **+0.172** |
+  | 1.00 | 0.374 | 0.529 | 0.921 | +0.155 |
+  Pretrained beats random at EVERY difficulty (stds ~0.001-0.009, so all real), and the
+  advantage widens to d=0.75 before narrowing as everything collapses. Phase 5 replicates.
+- **The interesting part**: at d=1.00 the SUPERVISED encoder still hits 0.921 presence F1 and
+  0.145 concentration MAE (nearly flat from 0.133 at d=0), while pretrained falls to 0.529 /
+  0.323. So the information is still there and still LINEARLY decodable - the task is not
+  intrinsically impossible at SNR 6. It is the *pretext task* that stops capturing it.
+- **Working hypothesis (needs testing, not established)**: at SNR 6 the raw-signal
+  reconstruction target is dominated by noise the model cannot predict, so the masked-MSE
+  gradient is mostly spent modelling noise rather than compound structure. Consistent with
+  pretraining held-out MSE jumping 0.00676 -> 0.02734 between d=0.75 and d=1.00. **Testable
+  fix for future work**: reconstruct the CLEAN component sum (a denoising objective) instead
+  of the raw noisy signal, or weight the loss toward peak regions. The data factory already
+  emits `clean_mixture`, so this is a small change.
+- **Robustness shape**: supervised features degrade GRACEFULLY (1.000 -> 0.921 presence).
+  Frozen SSL and random features degrade SHARPLY, with the steepest drop between d=0.75 and
+  d=1.00. Fine-tuned models sit in between (n=160 scratch: 0.853 -> 0.645 over that step).
+
+## Phase 6 follow-up - pretext-target ablation (built)
+- **Question**: Phase 6 showed frozen SSL features collapse at d=1.00 (0.529) while a
+  supervised encoder still hits 0.921 on the SAME data. So the information survives the noise
+  and is linearly decodable - the pretext task is what stops capturing it. Hypothesis: at
+  SNR 6 the reconstruction target is mostly unpredictable noise, so the masked-MSE gradient is
+  spent modelling noise instead of compound structure.
+- **Design**: swap ONLY the reconstruction target, hold everything else fixed.
+  `raw` = reconstruct the observed noisy signal (the Phase-3 pretext); `clean` = reconstruct
+  the noise-free component sum. Re-probe both frozen. Implemented as an optional `target` arg
+  on `masked_mse` (default None = predict the input, so the Phase-3 path is untouched - a test
+  asserts this, and the old-vs-new loop was checked bit-identical).
+- **DECISION - `clean` is an ORACLE DIAGNOSTIC, not a method.** `clean_mixture` is ground
+  truth that a real unlabeled setting would never hand you, so the clean arm is NOT
+  self-supervised. It exists to isolate the effect of noise in the target: if it recovers the
+  gap, the objective was the bottleneck and a noise-robust pretext is worth building; if not,
+  the hypothesis is wrong. This caveat is repeated in the script docstring, the config header,
+  and the `build_mixture_and_clean_tensors` docstring so it cannot get quietly reported as
+  "our SSL method improved". A genuinely self-supervised follow-up would be Noise2Noise-style
+  (predict one noisy realization from another).
+- **Control worked**: at d=0.00 (SNR 40, almost no noise) raw and clean are indistinguishable
+  (0.933 vs 0.936), exactly as predicted - the ablation is a no-op where there is no noise to
+  remove. That is what licenses attributing any divergence at the hard end to noise rather
+  than to some incidental difference between the two objectives.
+- **Note**: held-out MSE is NOT comparable across arms (a clean target is intrinsically easier
+  to hit than a noisy one). Only the downstream probe numbers are comparable.
+- **RESULT: THE HYPOTHESIS IS REFUTED.** Presence macro-F1 on frozen features:
+  | d | random | raw | clean | supervised | gap recovered by clean |
+  |---|---|---|---|---|---|
+  | 0.00 | 0.875 | 0.933 | 0.936 | 1.000 | +4% |
+  | 0.50 | 0.659 | 0.811 | 0.815 | 0.991 | +2% |
+  | 0.75 | 0.532 | 0.704 | 0.720 | 0.984 | +6% |
+  | 1.00 | 0.374 | 0.529 | **0.539** | 0.921 | **+2%** |
+  Even handed a PERFECT noise-free target - an oracle no real setting could provide - the
+  pretext gains +0.010 at d=1.00 and recovers 2% of the 0.392 gap to supervised. Stds are
+  0.001-0.009, so the non-effect is not noise. Concentration MAE tells the same story
+  (0.323 -> 0.319 at d=1.00). **Noise in the reconstruction target is NOT why pretraining
+  collapses at low SNR.** I wrote the hypothesis down before running this and it was wrong.
+- **What this rules OUT, and what it costs**: it kills the obvious follow-up. Noise2Noise-style
+  targets were the natural "genuinely self-supervised" version of this fix; if the ORACLE
+  target buys ~nothing, a cleverer self-supervised target will not either. Do not spend time
+  there. (This recommendation was already written into REPORT.md/paper.tex before the result
+  landed and had to be corrected - a good argument for running the ablation before writing.)
+- **What is still open (candidate explanations, none tested)**: (a) masked reconstruction may
+  be solvable by LOCAL interpolation - continue the peak shape from neighbouring context -
+  which never requires knowing WHICH compound produced it, so the objective simply does not
+  incentivize identity; supervised training optimizes identity directly, which is why it holds
+  up at 0.921. Low SNR would then hurt the local strategy without ever pushing the model
+  toward the global one. (b) The probe reads MEAN-POOLED patch tokens; the information could
+  be present nonlinearly, or concentrated in CLS, and simply invisible to this readout.
+  (c) Capacity is spent on low-level signal statistics. Distinguishing these is the real next
+  experiment - (b) is cheap to check (re-probe with CLS pooling and an MLP probe) and should
+  come first, because it is a measurement artifact rather than a claim about learning.
+- **What survives**: the Phase-6 fine-tuning gain at d=1.00, n=40 (+0.082, 3/3 seeds) is
+  unaffected - pretraining still helps FINE-TUNING at the hard end even though its FROZEN
+  features are weak there. Those two facts sit together and are worth keeping in view.
+
+## Phase 7 - report and packaging (built)
+- **`scripts/run_all.py`**: the "one command" from Working Agreement #7. Runs every stage in
+  phase order with `--list`, `--only`, `--skip-existing`. Stage order is load-bearing:
+  finetune/probes load the encoder pretrain writes, and the ablation reuses the encoders the
+  robustness sweep caches. Uses `check=True` so a failed stage stops the run rather than
+  letting later stages read stale artifacts and silently produce a wrong report.
+- **DECISION - two writeups, on purpose**: `REPORT.md` is the readable narrative (linked from
+  the README, easy to diff); `report/paper.tex` is the formal 4-6 page paper for the KIT
+  application/arXiv. Some duplication is accepted; the paper is the citable artifact.
+- **DECISION - figures are committed to `report/figures/`** even though `experiments/**` is
+  gitignored, so the paper compiles from a clean clone without re-running hours of training.
+  `scripts/build_paper.py` copies them across and fails loudly on a missing figure (a paper
+  silently missing a figure is worse than no paper).
+- **Toolchain**: tectonic (single self-contained binary, `brew install tectonic`) rather than
+  a multi-GB MacTeX install. Build with `python scripts/build_paper.py` -> `report/paper.pdf`.

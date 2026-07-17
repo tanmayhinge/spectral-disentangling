@@ -14,8 +14,9 @@ compounds are present, how many there are, and at what concentration, far better
 untrained encoder, and for concentration it comes close to an encoder that was trained
 directly on labels. The two measurements together are the interesting part of the project.
 
-The work is organized in phases. Phases 0 through 5 are complete and are described below.
-Phases 6 and 7 (robustness sweeps and a formal writeup) are planned and noted at the end.
+The work is organized in phases, all of which are now complete. A formatted PDF version of
+this writeup lives at `report/paper.pdf` (build it with `python scripts/build_paper.py`); this
+file is the longer, more conversational version, including the reasoning and the dead ends.
 
 ## Motivation
 
@@ -195,6 +196,128 @@ concentration result is the one I find most convincing: the pretrained encoder, 
 saw a label, decodes concentration almost as well as the encoder that was trained on labels
 (0.150 against 0.138), and much better than the random baseline (0.239).
 
+### Robustness: sweeping the difficulty knob
+
+Everything above runs on a single regime, and that regime is easy. The data factory exposes a
+single difficulty knob that interpolates three things at once from an easy end to a hard one:
+signal-to-noise from 40 down to 6, the maximum number of components from 2 up to 5, and peak
+jitter from 0.002 to 0.010 ppm. I swept it at five points with three seeds.
+
+One design choice matters here. At each difficulty I pretrain a *fresh* encoder on unlabeled
+mixtures drawn from that same difficulty, rather than reusing the single encoder from earlier.
+Reusing it would confound two different effects: the task getting harder, and the pretraining
+data no longer matching the test data. Matched pretraining also happens to be the realistic
+setting, where you have many unlabeled spectra from your own instrument and few labels.
+
+The prediction I wrote down before running this was that the null result from fine-tuning
+would reappear as a real gap once the task got hard enough that a from-scratch model could no
+longer catch up in a fixed budget. That prediction is *partially* supported, and only at the
+smallest label budget. Because the scratch and pretrained runs share a seed, the honest
+statistic is the paired per-seed difference rather than the difference of the means:
+
+| difficulty | gain at 40 labels | gain at 160 labels |
+| ---: | :--- | :--- |
+| 0.00 | +0.040 (3/3 seeds positive) | -0.000 (mixed) |
+| 0.25 | -0.018 (mixed) | -0.008 |
+| 0.50 | +0.024 (3/3 seeds positive) | +0.016 (mixed) |
+| 0.75 | +0.025 (3/3 seeds positive) | +0.014 |
+| 1.00 | **+0.082** (3/3 seeds positive) | +0.046 (mixed) |
+
+The one claim I will stand behind is the +0.082 at the hard end with 40 labels: every seed
+agrees on the sign and the effect is about four times the seed-to-seed spread. It is the
+largest pretraining win anywhere in this project. But the tidy story ("no gap when easy, gap
+when hard") is not what the data says, and I want to be precise about that. The curve is not
+monotone, since the easy end also shows a consistent +0.040. The dip at 0.25 is mixed-sign and
+within noise, so it is noise. And the +0.046 at 160 labels is driven by a single seed at
++0.116 while another seed goes negative, with a standard deviation larger than the mean, so I
+do not report it as an effect at all.
+
+The probe arm is where the sweep earns its keep. The pretrained encoder beats the random one at
+every difficulty, and the advantage actually widens as the task gets harder, from +0.058 to
++0.172 at difficulty 0.75. But look at what happens at the hard end:
+
+| difficulty | random | pretrained | supervised |
+| ---: | :--- | :--- | :--- |
+| 0.00 | 0.875 | 0.933 | 1.000 |
+| 0.25 | 0.771 | 0.877 | 0.996 |
+| 0.50 | 0.659 | 0.811 | 0.991 |
+| 0.75 | 0.532 | 0.704 | 0.984 |
+| 1.00 | 0.374 | 0.529 | **0.921** |
+
+At the hard end the supervised encoder still reaches 0.921 presence macro-F1, and its
+concentration error stays nearly flat across the entire sweep (0.133 to 0.145), while the
+pretrained encoder falls to 0.529 and 0.323. This asymmetry is the most interesting thing I
+found. The information is still present in the signal and still linearly decodable at SNR 6,
+because supervised training demonstrably reads it. So the hard regime is not intrinsically
+unsolvable. It is the *pretext task* that stops capturing the structure.
+
+Two artifacts of the knob are worth naming, because both could be misread as findings. At
+difficulty 0 the knob pins the maximum component count to the minimum, so every mixture has
+exactly K=2, the count probe has a single class, and every encoder scores a perfect 1.000
+including the random control. That is a broken metric, not a result, and it is reported as
+"n/a" rather than as a perfect score. Separately, the knob's component count takes the values
+2, 3, 4, 4, 5 across the five points, so difficulties 0.50 and 0.75 differ only in noise and
+jitter. Difficulty is a bundle of three quantities, not a scalar, and the x-axis should not be
+read as "amount of hardness".
+
+### Which part breaks: a pretext-target ablation
+
+The sweep left a specific hypothesis on the table, and I wrote it down before testing it. If
+the supervised encoder can still read compound identity at SNR 6 but the pretrained one
+cannot, maybe the problem is what the pretext is asked to predict. At SNR 6 the observed
+signal is mostly noise, and noise is exactly the part that cannot be predicted, so perhaps the
+masked-MSE gradient is spent modelling noise instead of compound structure. If that were true,
+the fix would be to change the target.
+
+So I changed only the target and held everything else fixed. The `raw` arm reconstructs the
+observed noisy signal, which is the original pretext. The `clean` arm reconstructs the
+noise-free component sum. Everything else is identical: same masking, same architecture, same
+budget, same seeds, same probe. One honesty note that matters for reading this: the clean
+signal is ground truth that a real unlabeled setting would never hand you, so the clean arm is
+**not** self-supervised. It is an oracle, deliberately. The point is diagnostic, not
+methodological: it puts an upper bound on what any better target could buy.
+
+The control behaves as it should. At difficulty 0, where SNR is 40 and there is almost no
+noise to remove, the two arms are indistinguishable (0.933 against 0.936). That is what
+licenses reading a difference at the hard end as being about noise rather than about some
+incidental difference between the objectives.
+
+| difficulty | random | raw | clean | supervised | gap recovered by clean |
+| ---: | :--- | :--- | :--- | :--- | :--- |
+| 0.00 | 0.875 | 0.933 | 0.936 | 1.000 | +4% |
+| 0.50 | 0.659 | 0.811 | 0.815 | 0.991 | +2% |
+| 0.75 | 0.532 | 0.704 | 0.720 | 0.984 | +6% |
+| 1.00 | 0.374 | 0.529 | **0.539** | 0.921 | **+2%** |
+
+**The hypothesis is wrong.** Handed a perfect, noise-free target at the hard end, the pretext
+gains 0.010 macro-F1, closing 2 percent of the 0.392 gap to the supervised encoder. The
+standard deviations are between 0.001 and 0.009, so this is a real non-effect rather than a
+noisy one, and concentration error tells the same story (0.323 to 0.319). Noise in the
+reconstruction target is not why masked pretraining collapses at low SNR.
+
+This was worth the half hour it cost, for two reasons. It kills the obvious follow-up: a
+Noise2Noise-style target was the natural genuinely-self-supervised version of this fix, and if
+the *oracle* target buys nothing then a cleverer self-supervised target will not either. That
+is a direction I would otherwise have spent real time on. And it sharpens the open question
+into something better than "pretraining degrades". My leading candidate explanation now, which
+I want to be clear is untested, is that masked reconstruction can be solved *locally*: to fill
+in a hidden span you can continue the peak shapes suggested by the neighbouring context,
+without ever knowing which compound produced them. If so, the objective never rewards identity
+at all, and supervised training holds up at 0.921 precisely because it optimizes identity
+directly. Low SNR would then degrade the local strategy without ever pushing the model toward
+a global one.
+
+There is a duller possibility I cannot yet exclude, and it should be checked first because it
+is a measurement artifact rather than a claim about learning: the probe reads mean-pooled patch
+tokens, so information that is present nonlinearly, or concentrated in the CLS token, would be
+invisible to it. Re-probing with CLS pooling and with a small MLP probe is cheap and would
+settle it.
+
+One thing survives all of this and is easy to lose sight of. The fine-tuning gain at the hard
+end (+0.082 at 40 labels, every seed agreeing) is untouched by the ablation. Pretraining still
+helps fine-tuning where labels are scarce and the task is hard, even though its frozen
+features are weak there. Both facts are true at once.
+
 ## Discussion
 
 The two experiments only make sense together. Fine-tuning says the final accuracy is the same
@@ -213,6 +336,17 @@ concentration nearly matches a supervised encoder. That is structure, not surfac
 memorization. It also reframes the null result from the fine-tuning experiment as a statement
 about the task and the training protocol rather than about the representation.
 
+The difficulty sweep then adds a caution I did not expect, and one I would not have found by
+staying on the easy regime. It is tempting to take "self-supervised pretraining learns
+physical structure" as a general claim. It is not. The structure it learns is contingent on
+the pretext objective staying informative, and a raw-reconstruction objective stops being
+informative exactly where you would most want the help: in the low-SNR regime, where labels
+are expensive and a good prior should matter most. The honest summary of the whole project is
+narrower than the headline and more useful than it: masked pretraining on these spectra learns
+real, linearly-decodable compositional structure; that structure is largely redundant when
+labels are plentiful and the task is clean; and it degrades faster than the task itself does
+as noise grows, for a reason we can point at.
+
 ## Limitations
 
 The data is synthetic and, at the default settings, not very hard. Peaks are distinct, noise
@@ -221,25 +355,59 @@ quickly. The model is small by design. The reconstruction objective has a height
 under-predicts tall peaks. The supervised encoder is an oracle ceiling for presence, since it
 was trained on presence labels, so the fairer comparison is concentration, which it was not
 trained on and where the pretrained encoder still nearly matches it. The random encoder is a
-single draw rather than an average over initializations. None of these invalidate the main
-comparison, but they set the boundaries of what I am claiming.
+single draw rather than an average over initializations.
 
-## Current status and planned work
+The robustness sweep adds two more. One encoder per difficulty is shared across the three
+seeds, so the error bars there capture fine-tuning and probe variance but not
+pretraining-run variance; a single unlucky pretraining run would be invisible to those bars,
+and that is a real gap given how much weight the +0.082 carries. And the difficulty knob moves
+three quantities at once, so a change along it cannot be attributed to noise, overlap, or
+jitter individually. Finally, the entire study is one architecture at one size, and nothing
+here speaks to what a larger model would do.
 
-Phases 0 through 5 are done: the repository skeleton and reproducibility tooling, the data
-factory, the from-scratch baseline, masked pretraining, the fine-tuning comparison, and the
-linear probes. The test suite has 31 tests covering seeding, the lineshapes, the reconstruction
-identity and other generator invariants, model shapes and metrics, the masking and weight
-transfer, the fine-tuning paths, and the probes.
+None of these invalidate the main comparisons, but they set the boundaries of what I am
+claiming.
 
-Two pieces remain. The first is a robustness sweep over a difficulty knob that lowers the
-signal-to-noise ratio and increases overlap and component count. The interesting prediction is
-that the fine-tuning gap, which is absent in the easy regime, should reappear as the task gets
-hard enough that a from-scratch model can no longer catch up in a fixed budget. The data
-factory already exposes this knob, so the sweep is mostly an experiment to run rather than code
-to write. The second is a formal writeup and a figure-generation pass. An optional extension is
-an attention analysis that checks whether attention concentrates on peak regions rather than
-empty baseline, as a second, independent view on what the model attends to.
+## Future work
+
+The ablation redirects this section, which is the most useful thing it did. The obvious next
+step *was* a noise-robust objective such as Noise2Noise, and that is now ruled out: if the
+oracle clean target recovers 2 percent of the gap, no self-supervised approximation to it will
+do better. I would have spent a week there.
+
+The real next step is to distinguish the two live explanations, cheapest first. Re-probe the
+existing encoders with CLS pooling and with a small MLP probe. That costs minutes, needs no
+retraining, and tells you whether the collapse is a property of the representation or merely of
+how I read it. Only if the representation genuinely lacks the information is the interesting
+explanation on the table, namely that masked reconstruction is solvable locally and never
+requires compound identity. That one predicts a specific fix: a pretext that cannot be solved
+by local continuation. Masking whole contiguous regions much larger than a multiplet, or
+masking one compound's peaks wherever they appear across the spectrum, would force the model to
+integrate evidence globally instead of interpolating. Contrastive objectives over mixtures that
+share components are another route to the same pressure.
+
+Beyond that: swapping the parametric component library for real single-compound spectra from
+nmrshiftdb2, which the library interface was designed to allow; a separation head that
+reconstructs the individual component signals rather than classifying presence, which is the
+version of the task closest to what a screening pipeline actually needs; an attention analysis
+checking whether attention concentrates on peak regions rather than empty baseline, as a
+second and independent view of what the model uses; and simply more seeds, since the paired
+analysis shows that several of the marginal claims here would be settled one way or the other
+by a handful more runs.
+
+## Reproducibility
+
+The project is Python and PyTorch with a short dependency list. Configuration lives in YAML
+files that map onto typed dataclasses, so there are no hard-coded constants, and every entry
+point seeds all random number generators from its config. The test suite has 46 tests covering
+seeding determinism, the lineshapes, the reconstruction identity and other generator
+invariants, model shapes and metrics, the masking and weight transfer, the fine-tuning paths,
+the probes, the difficulty knob, and the pretext-target plumbing.
+
+`python scripts/run_all.py` reruns every experiment in this report, in order, and regenerates
+every figure; `--list` shows the stages and their runtimes, and `--skip-existing` resumes.
+`python scripts/build_paper.py` rebuilds the PDF. Development ran on Apple Silicon (MPS); the
+same code runs on a single CUDA GPU.
 
 ## Reproducibility
 
