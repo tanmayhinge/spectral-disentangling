@@ -71,6 +71,13 @@ def _save_encoder(model, pcfg) -> None:
     torch.save(model.encoder.state_dict(), path)
     print(f"\nsaved pretrained encoder -> {path}")
 
+    # Also keep the full model (encoder + mask token + reconstruction head). The encoder alone
+    # is all the downstream phases need, but without the head a reconstruction figure cannot be
+    # regenerated without redoing the whole pretraining run.
+    full = path.with_name(path.stem + "_full.pt")
+    torch.save(model.state_dict(), full)
+    print(f"saved full masked model  -> {full}")
+
 
 def _save_curve(history) -> None:
     out = PROJECT_ROOT / "experiments"
